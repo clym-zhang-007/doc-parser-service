@@ -1,0 +1,79 @@
+services:
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: doc-parser-migrate
+    command: alembic upgrade head
+    volumes:
+      - ./:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: doc-parser-api
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/app
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: doc-parser-worker
+    command: celery -A app.workers.celery_app.celery_app worker --loglevel=info
+    volumes:
+      - ./:/app
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  redis:
+    image: redis:7-alpine
+    container_name: doc-parser-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
+      start_period: 2s
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: doc-parser-postgres
+    environment:
+      POSTGRES_DB: doc_parser
+      POSTGRES_USER: doc_parser
+      POSTGRES_PASSWORD: doc_parser
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U doc_parser -d doc_parser"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 15s
+
+volumes:
+  postgres_data:
