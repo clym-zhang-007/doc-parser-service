@@ -112,3 +112,4 @@ def get_job_result(job_id: str, db: Session = Depends(get_db)) -> JobResultRespo
         result=parsed_result,
         error=job.error_message,
     )
+    
