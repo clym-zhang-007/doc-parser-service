@@ -6,3 +6,6 @@ venv/
 .env
 frontend/node_modules/
 frontend/dist/
+
+# 用户上传与本地测试文件，勿提交（可能含密钥）
+storage/uploads/
