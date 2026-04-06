@@ -5,7 +5,9 @@ import re
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import HTTPException, UploadFile
+from fastapi import UploadFile
+
+from app.core.errors import ApiError, ErrorCode
 
 STORAGE_ROOT = Path(os.getenv("STORAGE_ROOT", "storage")).resolve()
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(50 * 1024 * 1024)))
@@ -47,13 +49,14 @@ async def save_job_upload(job_id: str, upload: UploadFile) -> tuple[str, str, st
     """
     raw_name = upload.filename or ""
     if not raw_name.strip():
-        raise HTTPException(status_code=400, detail="filename is required")
+        raise ApiError(ErrorCode.VALIDATION_ERROR, "filename is required", status_code=400)
 
     file_type = infer_file_type(raw_name)
     if file_type is None:
-        raise HTTPException(
+        raise ApiError(
+            ErrorCode.UNSUPPORTED_FILE_TYPE,
+            "unsupported file type; allowed: .pdf, .docx, .txt, .md, .markdown",
             status_code=415,
-            detail="unsupported file type; allowed: .pdf, .docx, .txt, .md, .markdown",
         )
 
     display_name = _safe_filename(raw_name)
@@ -77,16 +80,21 @@ async def save_job_upload(job_id: str, upload: UploadFile) -> tuple[str, str, st
                 size += len(chunk)
                 if size > MAX_UPLOAD_BYTES:
                     full_path.unlink(missing_ok=True)
-                    raise HTTPException(
+                    raise ApiError(
+                        ErrorCode.FILE_TOO_LARGE,
+                        f"file too large; max {MAX_UPLOAD_BYTES} bytes",
                         status_code=413,
-                        detail=f"file too large; max {MAX_UPLOAD_BYTES} bytes",
                     )
                 out.write(chunk)
-    except HTTPException:
+    except ApiError:
         raise
     except OSError as exc:
         full_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=500, detail=f"failed to save file: {exc}") from exc
+        raise ApiError(
+            ErrorCode.INTERNAL_ERROR,
+            f"failed to save file: {exc}",
+            status_code=500,
+        ) from exc
 
     return (str(rel_path).replace("\\", "/"), display_name, file_type)
 

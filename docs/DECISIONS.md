@@ -38,6 +38,15 @@
   - 代价：改模型后需记得生成并审阅迁移文件
 - 结论：纳入 V1 工程约定。
 
+## ADR-005：解析链 LlamaIndex 优先、按格式回退
+- 日期：2026-04-05
+- 决策：Worker 内优先用 `llama_index.core.SimpleDirectoryReader` 加载单文件；若异常或文本为空，再按 `file_type` 回退到 `pypdf` / `python-docx` / 纯文本读取。
+- 原因：先保证四格式在 Docker 内可稳定出字，再迭代纯 LlamaIndex 与块结构。
+- 影响：
+  - 正向：上线可演示端到端；复杂 PDF 仍可能依赖回退
+  - 代价：`meta.parser` 会体现实际使用的读取路径
+- 结论：纳入 V1 初版；后续可按格式收敛为单一引擎。
+
 ## 记录模板（复制使用）
 ```md
 ## ADR-xxx：标题

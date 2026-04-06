@@ -16,12 +16,12 @@
 - [x] 核心 HTTP 接口：`GET /health`，`POST /v1/jobs`（**multipart 上传文件**），`GET /v1/jobs/{job_id}`，`GET /v1/jobs/{job_id}/result`
 - [x] SQLAlchemy 模型 `Job`（`app/core/models.py`）与会话（`app/core/database.py`）
 - [x] Alembic 迁移（`alembic/`，首版 `0001_initial_jobs`）；`docker compose` 通过一次性 **`migrate` 服务** 执行 `alembic upgrade head`，`api` / `worker` 在其成功结束后再启动
-- [x] Celery Worker 与任务 `jobs.parse_document`（当前为占位解析结果，状态机 `queued → running → success/failed`）
+- [x] Celery Worker 与任务 `jobs.parse_document`（**LlamaIndex `SimpleDirectoryReader` + 按类型回退**，输出 `document` / `blocks` / `meta` / `error`）
 - [x] Pydantic 契约（`app/schemas/__init__.py`）
 
 ### 尚未完成（相对 V1 基线）
 
-- [ ] LlamaIndex（或等价）真实解析与 V1 约定统一结果 JSON（document/blocks/meta）
+- [ ] 结果 JSON 字段与基线进一步对齐（如按页块、更细 `meta`）；可选纯 LlamaIndex、去掉回退
 - [ ] 与基线一致的错误码与 HTTP 映射
 - [ ] 自动化测试与样例文档回归
 
@@ -45,6 +45,8 @@ docker compose up --build
 
 健康检查请使用 **HTTP** 与 **8000** 端口，例如：`http://localhost:8000/health`（不要用未配置的 `https` 或其它端口）。
 
+**上传页（React + Vite + Tailwind）**：`docker compose up --build` 后打开 `http://localhost:8000/` 或 `http://localhost:8000/ui/`（静态资源来自 `frontend/dist`）。本地联调前端见下文「前端开发」。
+
 创建任务示例（需安装依赖后本地或容器内执行，`file` 为实际路径）：
 
 ```bash
@@ -52,6 +54,28 @@ curl -s -X POST http://localhost:8000/v1/jobs -F "file=@./sample.pdf"
 ```
 
 允许扩展名：`.pdf`、`.docx`、`.txt`、`.md`、`.markdown`。文件写入 `storage/uploads/{job_id}/`，库字段 `jobs.storage_path` 存相对路径。
+
+### 前端开发（可选）
+
+技术栈：**Vite 6 + React 18 + TypeScript + Tailwind CSS**（`frontend/`）。
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+浏览器访问 **`http://localhost:5173/ui/`**（`vite.config.ts` 已设 `base: '/ui/'`，并将 `/v1`、`/health`、`/docs` 等代理到本机 `8000`）。请先在本机启动 API：`uvicorn app.main:app --reload` 或使用 Docker 只跑后端相关容器。
+
+生产构建：
+
+```bash
+cd frontend && npm run build
+```
+
+生成 `frontend/dist/` 后，FastAPI 会在 `/ui/` 托管；未构建时访问 `/` 会跳转到 `/docs`。
+
+**Docker Compose 使用卷 `./:/app` 时**：镜像里构建的 `frontend/dist` 会被本机目录覆盖。若本机没有 `frontend/dist`，上传页不可用，请在仓库根目录执行一次 `cd frontend && npm run build`，或临时去掉 compose 里的 `volumes` 仅用镜像内文件调试。
 
 ### 2) 数据库迁移（本地/CI 手动时）
 
@@ -75,6 +99,16 @@ docker compose down
 docker compose down -v
 ```
 
+### Docker 构建：拉取 `node` 镜像失败（如 USTC 镜像 `EOF`）
+
+构建前端阶段需要拉取 Node 基础镜像。若日志中出现 `docker.mirrors.ustc.edu.cn`…`EOF` 或 `failed to resolve source metadata`，属于**镜像加速器/网络**问题，不是业务代码错误。可依次尝试：
+
+1. **重试**：`docker compose build --no-cache`（偶发断线）。
+2. **换源或直连**：在 Docker Desktop → Settings → Docker Engine 里调整 `registry-mirrors`（换一个可用镜像或暂时移除镜像列表，改走官方 `registry-1.docker.io`），应用后重启 Docker。
+3. **先手动拉取**：`docker pull node:20-alpine`，成功后再 `docker compose up --build`。
+
+当前 Dockerfile 使用 **`node:20-alpine`**（LTS）。
+
 ## 主要代码路径
 
 | 路径 | 说明 |
@@ -87,10 +121,12 @@ docker compose down -v
 | `app/workers/celery_app.py` | Celery 应用与任务 |
 | `app/schemas/__init__.py` | 请求/响应模型 |
 | `app/services/storage.py` | 上传落盘与路径解析 |
+| `app/services/document_parse.py` | LlamaIndex 解析与 V1 结果组装 |
 | `alembic/` | 数据库迁移 |
+| `frontend/` | React 前端源码；`frontend/dist` 为构建输出 |
 
 ## 下一步（建议优先级）
 
-1. **真实解析**：按 `file_type` 读 `storage_path` 对应文件，接入 LlamaIndex，输出基线约定的 JSON，写入 `result_json`。
-2. **错误与契约**：统一错误码、422/404/409 等映射；OpenAPI 示例与版本说明。
+1. **结果与体验**：按页/标题细分 `blocks`；API 层统一错误码响应体；OpenAPI 示例。
+2. **错误与契约**：HTTP 层与基线错误码完整映射；失败路径测试。
 3. **测试与运维**：`pytest` 覆盖 API 与任务 happy path；可选结构化日志与 `/health` 扩展（db/redis 探测）。

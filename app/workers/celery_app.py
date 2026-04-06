@@ -6,13 +6,17 @@
 3) 维护任务状态流转并持久化处理结果。
 """
 
-from celery import Celery
 import json
+import logging
+
+from celery import Celery
 
 from app.core.database import Job, SessionLocal
+from app.services.document_parse import build_error_result, parse_stored_file
 from app.services.storage import absolute_path
 
-# broker: 任务队列（消息中转）；backend: 任务结果存储。
+logger = logging.getLogger(__name__)
+
 celery_app = Celery(
     "document_parser",
     broker="redis://redis:6379/0",
@@ -22,65 +26,78 @@ celery_app = Celery(
 
 @celery_app.task(name="health.ping")
 def ping() -> str:
-    """Worker 健康检查任务。
-
-    Returns:
-        str: 固定返回 "pong"。
-    """
+    """Worker 健康检查任务。"""
     return "pong"
 
 
 @celery_app.task(name="jobs.parse_document", bind=True)
 def parse_document(self, job_id: str) -> dict:
-    """执行文档解析任务并回写状态到数据库。
-
-    Args:
-        self: Celery 绑定任务实例（当前实现未使用）。
-        job_id: 任务 ID（由 API 层创建并传入）。
-
-    Returns:
-        dict: 解析结果字典。
-
-    Raises:
-        ValueError: 当 job_id 不存在时抛出。
-        Exception: 解析过程中的其他异常会继续上抛给 Celery。
-    """
-    # Worker 内部独立创建数据库会话，不复用 API 请求会话。
+    """执行文档解析：读本地存储文件，LlamaIndex 抽取文本，写入基线结构 result_json。"""
     db = SessionLocal()
     try:
         job = db.query(Job).filter(Job.id == job_id).first()
         if not job:
             raise ValueError(f"job not found: {job_id}")
 
-        # 状态流转：queued -> running。
         job.status = "running"
         db.commit()
 
         path = absolute_path(job.storage_path)
-        file_exists = path is not None and path.is_file()
+        if path is None or not path.is_file():
+            err = build_error_result(
+                code="PARSE_FAILED",
+                message="stored file missing or path invalid",
+                file_type=job.file_type,
+                file_name=job.file_name,
+                storage_path=job.storage_path,
+            )
+            job.status = "failed"
+            job.error_message = "PARSE_FAILED: stored file missing or path invalid"
+            job.result_json = json.dumps(err, ensure_ascii=False)
+            db.commit()
+            raise FileNotFoundError(job.storage_path)
 
-        # V1 先提供最小可用占位结果，后续替换为真实解析流程（读 path）。
-        result = {
-            "summary": f"parsed {job.file_name}",
-            "file_type": job.file_type,
-            "storage_path": job.storage_path,
-            "file_exists": file_exists,
-            "text_length": 0,
-        }
-        # 状态流转：running -> success，并写入可持久化结果。
+        try:
+            result = parse_stored_file(
+                path=path,
+                file_type=job.file_type or "",
+                file_name=job.file_name,
+                storage_path=job.storage_path,
+            )
+        except Exception as exc:
+            logger.exception("parse failed job_id=%s", job_id)
+            err = build_error_result(
+                code="PARSE_FAILED",
+                message=str(exc),
+                file_type=job.file_type,
+                file_name=job.file_name,
+                storage_path=job.storage_path,
+            )
+            job.status = "failed"
+            job.error_message = f"PARSE_FAILED: {exc}"
+            job.result_json = json.dumps(err, ensure_ascii=False)
+            db.commit()
+            raise
+
         job.status = "success"
         job.error_message = None
         job.result_json = json.dumps(result, ensure_ascii=False)
         db.commit()
         return result
     except Exception as exc:
-        # 状态流转：running -> failed，并记录错误上下文。
-        job = db.query(Job).filter(Job.id == job_id).first()
-        if job:
-            job.status = "failed"
-            job.error_message = str(exc)
+        job2 = db.query(Job).filter(Job.id == job_id).first()
+        if job2 and job2.status == "running":
+            err = build_error_result(
+                code="PARSE_FAILED",
+                message=str(exc),
+                file_type=job2.file_type,
+                file_name=job2.file_name,
+                storage_path=job2.storage_path,
+            )
+            job2.status = "failed"
+            job2.error_message = f"PARSE_FAILED: {exc}"
+            job2.result_json = json.dumps(err, ensure_ascii=False)
             db.commit()
         raise
     finally:
-        # 无论成功或失败，都关闭会话释放连接。
         db.close()
