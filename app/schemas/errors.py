@@ -2,7 +2,6 @@
 
 from pydantic import BaseModel, Field
 
-
 class ErrorBody(BaseModel):
     """单条错误说明。"""
 
