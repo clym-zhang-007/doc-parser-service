@@ -9,11 +9,12 @@ from typing import Any
 from .blocks_coalesce import coalesce_small_blocks, normalize_newlines, split_blocks_simple
 from .markdown_blocks import split_blocks_markdown
 from .txt_blocks import split_blocks_txt
+from .docx_blocks import extract_docx_text_and_blocks
 
 logger = logging.getLogger(__name__)
 
 
-BLOCKS_SCHEMA_VERSION = "1.5"
+BLOCKS_SCHEMA_VERSION = "1.6"
 
 
 def split_blocks(text: str, file_type: str) -> tuple[list[dict[str, Any]], str]:
@@ -23,7 +24,10 @@ def split_blocks(text: str, file_type: str) -> tuple[list[dict[str, Any]], str]:
         return split_blocks_markdown(text), "markdown.heading_list_v4"
     if ft == "txt":
         return split_blocks_txt(text), "txt.paragraph_v1"
-    # 其它类型先保持旧行为
+    if ft == "docx":
+        # docx 的 blocks 在 parse_stored_file 里从结构抽取，这里仅作为兜底
+        return split_blocks_txt(text), "docx.paragraph_v1"
+    # 其它类型先保持旧行为（空行兜底）
     return coalesce_small_blocks(split_blocks_simple(text)), "simple.blankline_v1"
 
 
@@ -67,6 +71,10 @@ def _extract_fallback(path: Path, file_type: str) -> tuple[str, str]:
 
 def extract_text(path: Path, file_type: str) -> tuple[str, str]:
     """抽取纯文本；返回 (text, parser_used)。"""
+    ft = (file_type or "").lower()
+    # docx 直接用 python-docx，避免 LlamaIndex 黑盒差异
+    if ft == "docx":
+        return _extract_fallback(path, file_type)
     try:
         text, name = _extract_with_llamaindex(path)
         if text:
@@ -74,7 +82,6 @@ def extract_text(path: Path, file_type: str) -> tuple[str, str]:
         logger.warning("llamaindex returned empty text for %s, using fallback", path)
     except Exception:
         logger.exception("llamaindex load failed for %s, using fallback", path)
-
     return _extract_fallback(path, file_type)
 
 
@@ -118,6 +125,29 @@ def parse_stored_file(
     storage_path: str | None,
 ) -> dict[str, Any]:
     """解析已落盘文件，返回可写入 result_json 的字典。"""
+    ft = (file_type or "").lower()
+    if ft == "docx":
+        text, blocks, quality = extract_docx_text_and_blocks(path)
+        title = Path(file_name or "document").stem
+        block_strategy = "docx.structure_v1_1"
+        text = normalize_newlines(text)
+        return {
+            "document": {"title": title, "text": text},
+            "blocks": blocks,
+            "meta": {
+                "file_type": file_type,
+                "file_name": file_name,
+                "storage_path": storage_path,
+                "char_count": len(text),
+                "block_count": len(blocks),
+                "parser": "python-docx",
+                "blocks_schema_version": BLOCKS_SCHEMA_VERSION,
+                "block_strategy": block_strategy,
+                "structure_quality": quality,
+            },
+            "error": None,
+        }
+
     text, parser_used = extract_text(path, file_type)
     return build_v1_result(
         text=text,

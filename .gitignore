@@ -9,3 +9,5 @@ frontend/dist/
 
 # 用户上传与本地测试文件，勿提交（可能含密钥）
 storage/uploads/
+# 本地临时 DOCX 调试样本
+storage/_tmp_*.docx
