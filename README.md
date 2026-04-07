@@ -13,7 +13,7 @@
 |------|--------|----------|
 | HTTP API / OpenAPI 版本 | `0.1.0` | `app/main.py` → `FastAPI(..., version="0.1.0")` |
 | 上传页（前端包版本） | `0.1.0` | `frontend/package.json` → `version` |
-| 解析结果 `meta.blocks_schema_version` | `1.1` | `app/services/document_parse.py` → `BLOCKS_SCHEMA_VERSION` |
+| 解析结果 `meta.blocks_schema_version` | `1.5` | `app/services/document_parse.py` → `BLOCKS_SCHEMA_VERSION` |
 
 **文档同步日期**：`2026-04-07`（与 `docs/V1-开发基线.md` 中「实现进度对照」表头一致）。若升级 API 版本或分块 schema，请同时改上表与基线文档。
 
@@ -140,9 +140,10 @@ docker compose down -v
 
 成功解析时，`result_json` 内 `meta` 除 `file_type`、`parser`、`char_count` 等外，还包含：
 
-- **`blocks_schema_version`**：当前为 `1.1`（与 `app/services/document_parse.py` 中常量一致）；分块字段含义或规则变更时递增，便于前后端与离线分析对齐。
+- **`blocks_schema_version`**：当前为 `1.5`（与 `app/services/document_parse.py` 中常量一致）；分块字段含义或规则变更时递增，便于前后端与离线分析对齐。
+- **`blocks[].char_count`**：`1.4` 起每个分块含主体字符数（与块内 `text` 长度一致，含换行）；英文约 `tokens ≈ char_count / 4`，中文视分词器而定，仅作粗算。
 - **`block_strategy`**：本次 `blocks` 的**分块策略名**（与「全文用何 loader 抽取」的 `parser` 不同）。取值示例：
-  - `markdown.heading_v1`：Markdown 按 ATX 标题、段落、围栏代码块切分，再经小块合并/大块切分。
+  - `markdown.heading_list_v4`：在 v3 基础上，GFM **管道表**为 `table`（`text` 为源码、`rows` 为单元格矩阵）；**整行仅** `![alt](url)` / `[label](url)` 时为 `image` / `link`（含 `url` 等字段，`text` 为对应 Markdown 片段）；行内混排链接与图片仍留在 `paragraph`。
   - `txt.paragraph_v1`：TXT 软换行修复 + 段落，再经合并/切分。
   - `simple.blankline_v1`：PDF/DOCX 等仍按空行分段兜底。
 
