@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+
 from pathlib import Path
 from typing import Any
 
@@ -10,12 +11,12 @@ from .blocks_coalesce import coalesce_small_blocks, normalize_newlines, split_bl
 from .markdown_blocks import split_blocks_markdown
 from .txt_blocks import split_blocks_txt
 from .docx_blocks import extract_docx_text_and_blocks
+from .pdf_blocks import extract_pdf_text_with_mineru
 
 logger = logging.getLogger(__name__)
 
 
 BLOCKS_SCHEMA_VERSION = "1.6"
-
 
 def split_blocks(text: str, file_type: str) -> tuple[list[dict[str, Any]], str]:
     """按 file_type 选择分块策略；返回 (blocks, strategy_name)。"""
@@ -50,6 +51,9 @@ def _extract_fallback(path: Path, file_type: str) -> tuple[str, str]:
         return raw, "utf8_plain"
 
     if ft == "pdf":
+        mined = extract_pdf_text_with_mineru(path)
+        if mined is not None:
+            return mined
         from pypdf import PdfReader
 
         reader = PdfReader(str(path))
@@ -72,9 +76,17 @@ def _extract_fallback(path: Path, file_type: str) -> tuple[str, str]:
 def extract_text(path: Path, file_type: str) -> tuple[str, str]:
     """抽取纯文本；返回 (text, parser_used)。"""
     ft = (file_type or "").lower()
-    # docx 直接用 python-docx，避免 LlamaIndex 黑盒差异
+    # docx 直接用 python-docx（结构化 blocks 在 parse_stored_file），避免 LlamaIndex 黑盒差异
     if ft == "docx":
         return _extract_fallback(path, file_type)
+    # pdf 优先走 MinerU（v4/v1）→ pypdf，再兜底尝试 LlamaIndex
+    if ft == "pdf":
+        try:
+            text, parser = _extract_fallback(path, file_type)
+            if text:
+                return text, parser
+        except Exception:
+            logger.exception("pdf fallback extract failed for %s, trying llamaindex", path)
     try:
         text, name = _extract_with_llamaindex(path)
         if text:

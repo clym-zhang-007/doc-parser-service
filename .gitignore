@@ -11,3 +11,15 @@ frontend/dist/
 storage/uploads/
 # 本地临时 DOCX 调试样本
 storage/_tmp_*.docx
+storage/_tmp_*.pdf
+storage/_tmp_*.txt
+storage/_tmp_*.html
+storage/_tmp_*.json
+storage/_tmp_*.xml
+storage/_tmp_*.csv
+storage/_tmp_*.tsv
+storage/_tmp_*.xlsx
+storage/_tmp_*.xls
+storage/_tmp_*.pptx
+storage/_tmp_*.ppt
+storage/_tmp_*.odt
