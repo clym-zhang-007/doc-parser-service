@@ -17,12 +17,13 @@
 - [x] SQLAlchemy 模型 `Job`（`app/core/models.py`）与会话（`app/core/database.py`）
 - [x] Alembic 迁移（`alembic/`，首版 `0001_initial_jobs`）；`docker compose` 通过一次性 **`migrate` 服务** 执行 `alembic upgrade head`，`api` / `worker` 在其成功结束后再启动
 - [x] Celery Worker 与任务 `jobs.parse_document`（**LlamaIndex `SimpleDirectoryReader` + 按类型回退**，输出 `document` / `blocks` / `meta` / `error`）
+- [x] 统一错误体与基础日志（`app/core/error_handlers.py` + `app/core/errors.py`；失败时统一输出 `{"error": {"code", "message"}}`，并在全局/worker 侧记录异常上下文）
 - [x] Pydantic 契约（`app/schemas/__init__.py`）
 
 ### 尚未完成（相对 V1 基线）
 
 - [ ] 结果 JSON 字段与基线进一步对齐（如按页块、更细 `meta`）；可选纯 LlamaIndex、去掉回退
-- [ ] 与基线一致的错误码与 HTTP 映射
+- [ ] 与基线一致的错误码覆盖与 OpenAPI 示例（已有基础版：错误体统一、上传/解析失败等场景抛出 `UNSUPPORTED_FILE_TYPE` / `FILE_TOO_LARGE` / `JOB_NOT_FOUND` / `RESULT_NOT_READY` / `PARSE_FAILED` / `INTERNAL_ERROR`，以及 HTTP 422 的 `VALIDATION_ERROR`）
 - [ ] 自动化测试与样例文档回归
 
 ## 使用 Docker 运行
@@ -127,6 +128,6 @@ docker compose down -v
 
 ## 下一步（建议优先级）
 
-1. **结果与体验**：按页/标题细分 `blocks`；API 层统一错误码响应体；OpenAPI 示例。
-2. **错误与契约**：HTTP 层与基线错误码完整映射；失败路径测试。
-3. **测试与运维**：`pytest` 覆盖 API 与任务 happy path；可选结构化日志与 `/health` 扩展（db/redis 探测）。
+1. **结果与体验**：细化 `blocks`（按页/标题/段落更稳定）与 `meta`；逐步收敛 blocks 的切分策略与回退逻辑。
+2. **错误与契约（后置精修）**：补齐缺口的错误码覆盖、以及最小必需的 OpenAPI 示例；失败路径的字段一致性优先。
+3. **测试与运维（后置）**：`pytest` 覆盖 happy path 与失败路径；可选结构化日志与 `/health` 扩展（db/redis 探测）。
