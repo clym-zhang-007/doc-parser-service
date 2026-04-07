@@ -7,7 +7,17 @@
 - 开发基线：`docs/V1-开发基线.md`
 - 架构决策：`docs/DECISIONS.md`
 
-## 当前进度（截至 2026-04-04）
+## 版本信息（与代码一致，便于追溯）
+
+| 项目 | 当前值 | 代码位置 |
+|------|--------|----------|
+| HTTP API / OpenAPI 版本 | `0.1.0` | `app/main.py` → `FastAPI(..., version="0.1.0")` |
+| 上传页（前端包版本） | `0.1.0` | `frontend/package.json` → `version` |
+| 解析结果 `meta.blocks_schema_version` | `1.1` | `app/services/document_parse.py` → `BLOCKS_SCHEMA_VERSION` |
+
+**文档同步日期**：`2026-04-07`（与 `docs/V1-开发基线.md` 中「实现进度对照」表头一致）。若升级 API 版本或分块 schema，请同时改上表与基线文档。
+
+## 当前进度（截至 2026-04-07）
 
 ### 已完成
 
@@ -125,6 +135,18 @@ docker compose down -v
 | `app/services/document_parse.py` | LlamaIndex 解析与 V1 结果组装 |
 | `alembic/` | 数据库迁移 |
 | `frontend/` | React 前端源码；`frontend/dist` 为构建输出 |
+
+## 解析结果 `meta`（分块追溯）
+
+成功解析时，`result_json` 内 `meta` 除 `file_type`、`parser`、`char_count` 等外，还包含：
+
+- **`blocks_schema_version`**：当前为 `1.1`（与 `app/services/document_parse.py` 中常量一致）；分块字段含义或规则变更时递增，便于前后端与离线分析对齐。
+- **`block_strategy`**：本次 `blocks` 的**分块策略名**（与「全文用何 loader 抽取」的 `parser` 不同）。取值示例：
+  - `markdown.heading_v1`：Markdown 按 ATX 标题、段落、围栏代码块切分，再经小块合并/大块切分。
+  - `txt.paragraph_v1`：TXT 软换行修复 + 段落，再经合并/切分。
+  - `simple.blankline_v1`：PDF/DOCX 等仍按空行分段兜底。
+
+详见 `docs/V1-开发基线.md` 中「结果 JSON 与分块策略」。
 
 ## 下一步（建议优先级）
 
